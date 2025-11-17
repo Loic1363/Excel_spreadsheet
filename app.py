@@ -327,31 +327,36 @@ def make_dynamic_line_chart(df, y_col, y_label):
     return chart
 
 
+def make_basic_line_chart(df, y_col, y_label):
+    s = df[y_col].dropna()
+    if s.empty:
+        return None
+    chart = (
+        alt.Chart(df.reset_index())
+        .mark_line()
+        .encode(
+            x=alt.X("date:T", title="Date"),
+            y=alt.Y(f"{y_col}:Q", title=y_label),
+            tooltip=["date:T", alt.Tooltip(f"{y_col}:Q", title=y_label)],
+        )
+        .properties(height=300)
+    )
+    return chart
+
+
 def make_liquids_chart(df_sorted, cols, label_map):
     df_liquids = df_sorted[cols]
     df_melt = df_liquids.reset_index().melt("date", var_name="type", value_name="value")
     df_melt = df_melt.dropna(subset=["value"])
-    df_melt = df_melt[df_melt["value"] != 0]
-
     if df_melt.empty:
         return None
-
     df_melt["type"] = df_melt["type"].map(label_map)
-
-    ymin = df_melt["value"].min()
-    ymax = df_melt["value"].max()
-    if ymin == ymax:
-        ymin -= 1
-        ymax += 1
-    padding = (ymax - ymin) * 0.1
-    domain = (ymin - padding, ymax + padding)
-
     chart = (
         alt.Chart(df_melt)
         .mark_line()
         .encode(
             x=alt.X("date:T", title="Date"),
-            y=alt.Y("value:Q", title="Quantité", scale=alt.Scale(domain=domain)),
+            y=alt.Y("value:Q", title="Quantité"),
             color=alt.Color("type:N", title="Liquide"),
             tooltip=["date:T", "type:N", "value:Q"],
         )
@@ -490,14 +495,14 @@ def main():
                 st.write("Pas de données de sommeil utiles.")
 
             st.markdown("#### Nicotine (`%nico`)")
-            chart_nico = make_dynamic_line_chart(df_sorted, "nico", "%nico")
+            chart_nico = make_basic_line_chart(df_sorted, "nico", "%nico")
             if chart_nico is not None:
                 st.altair_chart(chart_nico, use_container_width=True)
             else:
                 st.write("Pas de données de nicotine utiles.")
 
             st.markdown("#### Course (km)")
-            chart_run = make_dynamic_line_chart(df_sorted, "run_km", "Course (km)")
+            chart_run = make_basic_line_chart(df_sorted, "run_km", "Course (km)")
             if chart_run is not None:
                 st.altair_chart(chart_run, use_container_width=True)
             else:
@@ -526,7 +531,7 @@ def main():
                 if chart_liquids is not None:
                     st.altair_chart(chart_liquids, use_container_width=True)
                 else:
-                    st.info("Pas de données de liquides utiles (toutes à 0 ou vides).")
+                    st.info("Pas de données de liquides utiles (toutes vides).")
             else:
                 st.info("Sélectionne au moins un liquide pour afficher le graphique.")
 
