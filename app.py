@@ -370,7 +370,7 @@ def main():
 
     init_db()
 
-    st.title("📊 Suivi journalier (version app du fichier Excel)")
+    st.title("〆 Suivi journalier")
 
     df = load_all()
 
@@ -398,7 +398,7 @@ def main():
         def dv(key, default):
             return existing.get(key) if existing and existing.get(key) is not None else default
 
-        st.markdown("### Boissons & nicotine")
+        st.markdown("### Boissons")
         c1, c2, c3 = st.columns(3)
         with c1:
             water_l = st.number_input("Eau (L / jour)", 0.0, 10.0, dv("water_l", 0.0), step=0.1)
@@ -494,7 +494,7 @@ def main():
             else:
                 st.write("Pas de données de sommeil utiles.")
 
-            st.markdown("#### Nicotine (`%nico`)")
+            st.markdown("#### Nicotine")
             chart_nico = make_basic_line_chart(df_sorted, "nico", "%nico")
             if chart_nico is not None:
                 st.altair_chart(chart_nico, use_container_width=True)
