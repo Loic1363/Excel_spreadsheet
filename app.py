@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import altair as alt
 from datetime import date, datetime, time, timedelta
 
 DB_PATH = "journal_bt.db"
@@ -301,6 +302,64 @@ def import_csv_to_db(file) -> int:
     return count
 
 
+def make_dynamic_line_chart(df, y_col, y_label):
+    s = df[y_col].dropna()
+    s = s[s != 0]
+    if s.empty:
+        return None
+    ymin = s.min()
+    ymax = s.max()
+    if ymin == ymax:
+        ymin -= 1
+        ymax += 1
+    padding = (ymax - ymin) * 0.1
+    domain = (ymin - padding, ymax + padding)
+    chart = (
+        alt.Chart(df.reset_index())
+        .mark_line()
+        .encode(
+            x=alt.X("date:T", title="Date"),
+            y=alt.Y(f"{y_col}:Q", title=y_label, scale=alt.Scale(domain=domain)),
+            tooltip=["date:T", alt.Tooltip(f"{y_col}:Q", title=y_label)],
+        )
+        .properties(height=300)
+    )
+    return chart
+
+
+def make_liquids_chart(df_sorted, cols, label_map):
+    df_liquids = df_sorted[cols]
+    df_melt = df_liquids.reset_index().melt("date", var_name="type", value_name="value")
+    df_melt = df_melt.dropna(subset=["value"])
+    df_melt = df_melt[df_melt["value"] != 0]
+
+    if df_melt.empty:
+        return None
+
+    df_melt["type"] = df_melt["type"].map(label_map)
+
+    ymin = df_melt["value"].min()
+    ymax = df_melt["value"].max()
+    if ymin == ymax:
+        ymin -= 1
+        ymax += 1
+    padding = (ymax - ymin) * 0.1
+    domain = (ymin - padding, ymax + padding)
+
+    chart = (
+        alt.Chart(df_melt)
+        .mark_line()
+        .encode(
+            x=alt.X("date:T", title="Date"),
+            y=alt.Y("value:Q", title="Quantité", scale=alt.Scale(domain=domain)),
+            color=alt.Color("type:N", title="Liquide"),
+            tooltip=["date:T", "type:N", "value:Q"],
+        )
+        .properties(height=300)
+    )
+    return chart
+
+
 def main():
     st.set_page_config(page_title="Suivi BT", layout="wide")
 
@@ -417,20 +476,32 @@ def main():
             df_sorted = df.sort_values("date").set_index("date")
 
             st.markdown("#### Poids (kg)")
-            df_weight = df_sorted.dropna(subset=["weight"])
-            if not df_weight.empty:
-                st.line_chart(df_weight["weight"])
+            chart_weight = make_dynamic_line_chart(df_sorted, "weight", "Poids (kg)")
+            if chart_weight is not None:
+                st.altair_chart(chart_weight, use_container_width=True)
             else:
-                st.write("Pas encore de poids saisis.")
+                st.write("Pas de données de poids utiles (toutes à 0 ou vides).")
 
             st.markdown("#### Sommeil (heures par nuit)")
-            st.line_chart(df_sorted["sleep_hours"])
+            chart_sleep = make_dynamic_line_chart(df_sorted, "sleep_hours", "Sommeil (h)")
+            if chart_sleep is not None:
+                st.altair_chart(chart_sleep, use_container_width=True)
+            else:
+                st.write("Pas de données de sommeil utiles.")
 
             st.markdown("#### Nicotine (`%nico`)")
-            st.line_chart(df_sorted["nico"])
+            chart_nico = make_dynamic_line_chart(df_sorted, "nico", "%nico")
+            if chart_nico is not None:
+                st.altair_chart(chart_nico, use_container_width=True)
+            else:
+                st.write("Pas de données de nicotine utiles.")
 
             st.markdown("#### Course (km)")
-            st.line_chart(df_sorted["run_km"])
+            chart_run = make_dynamic_line_chart(df_sorted, "run_km", "Course (km)")
+            if chart_run is not None:
+                st.altair_chart(chart_run, use_container_width=True)
+            else:
+                st.write("Pas de données de course utiles.")
 
             st.markdown("#### Consommation de liquides")
 
@@ -441,6 +512,7 @@ def main():
                 "Alcool fort (cl)": "alcool_cl",
                 "Soda (L)": "soda_l",
             }
+            reverse_label = {v: k for k, v in liquid_options.items()}
 
             selected_liquids = st.multiselect(
                 "Liquides à afficher",
@@ -450,8 +522,11 @@ def main():
 
             if selected_liquids:
                 cols = [liquid_options[label] for label in selected_liquids]
-                df_liquids = df_sorted[cols]
-                st.line_chart(df_liquids)
+                chart_liquids = make_liquids_chart(df_sorted, cols, reverse_label)
+                if chart_liquids is not None:
+                    st.altair_chart(chart_liquids, use_container_width=True)
+                else:
+                    st.info("Pas de données de liquides utiles (toutes à 0 ou vides).")
             else:
                 st.info("Sélectionne au moins un liquide pour afficher le graphique.")
 
