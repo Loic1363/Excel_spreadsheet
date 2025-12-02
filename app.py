@@ -1,3 +1,4 @@
+import altair as alt
 import streamlit as st
 from datetime import date, time
 
@@ -22,6 +23,8 @@ LANGUAGE_LABELS = {
 }
 LANGUAGE_NAME_MAP = {code: name for code, name in LANGUAGES}
 LANGUAGE_WIDGET_KEY = "language_selector"
+THEME_WIDGET_KEY = "theme_selector"
+ALT_DARK_THEME_NAME = "bt_dark_theme"
 
 TRANSLATIONS = {
     "app_title": {
@@ -174,9 +177,9 @@ TRANSLATIONS = {
         "nl": "Geen bruikbare slaapgegevens.",
     },
     "nico_chart_title": {
-        "en": "Nicotine (`%nico`)",
-        "fr": "Nicotine (`%nico`)",
-        "nl": "Nicotine (`%nico`)",
+        "en": "Nicotine (%nico)",
+        "fr": "Nicotine (%nico)",
+        "nl": "Nicotine (%nico)",
     },
     "nico_chart_info": {
         "en": "No useful nicotine data.",
@@ -290,6 +293,191 @@ LIQUID_LABELS = {
     "soda_l": {"en": "Soda (L)", "fr": "Soda (L)", "nl": "Frisdrank (L)"},
 }
 
+DARK_THEME_CSS = """
+:root {
+    color-scheme: dark;
+}
+[data-testid="stAppViewContainer"] {
+    background: radial-gradient(circle at 12% 20%, #1c2435 0%, #101a2e 55%, #0b1220 100%) !important;
+    color: #f5f7ff;
+}
+[data-testid="stSidebar"] > div:first-child {
+    background: linear-gradient(180deg, rgba(10,16,32,0.95) 0%, rgba(7,11,24,0.95) 100%) !important;
+}
+.stApp {
+    background-color: #0f172a !important;
+    color: #f5f7ff !important;
+}
+h1, h2, h3, h4, h5, h6, label, p, span, .stMetric label {
+    color: #f8fafc !important;
+}
+input, textarea, select,
+.stTextInput>div>div>input,
+.stNumberInput>div>div>input,
+.stTextArea textarea,
+.stDateInput>div>div>input,
+.stTimeInput input,
+.stSelectbox>div>div>div>input,
+.stMultiSelect>div>div>div>div,
+div[data-baseweb="select"] > div {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    color: #f8fafc !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 10px !important;
+}
+.stCheckbox>label, .stRadio>label {
+    color: #f8fafc !important;
+}
+.stButton>button, .stDownloadButton>button {
+    background: linear-gradient(120deg, #3b82f6, #6366f1) !important;
+    color: #f8fafc !important;
+    border: none !important;
+    border-radius: 999px !important;
+    box-shadow: 0 8px 16px rgba(99, 102, 241, 0.35);
+}
+.stButton>button:hover, .stDownloadButton>button:hover {
+    box-shadow: 0 12px 24px rgba(59, 130, 246, 0.45);
+}
+[data-testid="stMetricValue"], [data-testid="stMetricDelta"] {
+    color: #f8fafc !important;
+}
+[data-testid="stDataFrame"] {
+    background-color: rgba(15, 23, 42, 0.75) !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+[data-testid="stDataFrame"] div[role="table"] {
+    color: #e5e7eb !important;
+}
+.stAlert {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+    color: #f8fafc !important;
+}
+"""
+
+THEME_TOGGLE_CONTROL_CSS = """
+.theme-toggle-control {
+    margin: 0.5rem 0 1rem 0;
+}
+.theme-toggle-control [data-testid*="SliderLabel"],
+.theme-toggle-control [data-testid*="SliderValue"],
+.theme-toggle-control [data-testid*="ThumbValue"],
+.theme-toggle-control label p {
+    display: none;
+}
+.theme-toggle-control [data-testid*="Slider"] {
+    padding: 0 !important;
+}
+.theme-toggle-control [data-testid*="Slider"] > div:first-child,
+.theme-toggle-control [data-testid*="Slider"] > div:last-child,
+.theme-toggle-control [data-testid*="Slider"] [data-testid="stTickBar"] {
+    display: none !important;
+}
+.theme-toggle-control [data-baseweb="slider"] {
+    background: #1e2536;
+    border-radius: 999px;
+    padding: 6px;
+    height: 44px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    position: relative;
+}
+.theme-toggle-control [data-baseweb="slider"]::before,
+.theme-toggle-control [data-baseweb="slider"]::after {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 18px;
+    pointer-events: none;
+}
+.theme-toggle-control [data-baseweb="slider"]::before {
+    content: "☀️";
+    left: 14px;
+}
+.theme-toggle-control [data-baseweb="slider"]::after {
+    content: "🌙";
+    right: 14px;
+}
+.theme-toggle-control [data-baseweb="slider"] div[role="slider"] {
+    background: linear-gradient(140deg, #fef3c7, #fde7a9);
+    color: transparent;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    border: none;
+    transition: transform 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+.theme-toggle-control [data-baseweb="slider"] div[role="slider"][aria-valuenow="1"] {
+    background: linear-gradient(140deg, #7dd3fc, #a78bfa);
+    box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+}
+.theme-toggle-control [data-baseweb="slider"] div[role="slider"] span {
+    display: none;
+}
+.theme-toggle-control [data-baseweb="slider"] div[data-testid*="ThumbValue"] {
+    display: none;
+}
+"""
+
+THEMES = {
+    "light": {"label": "☀️", "name": "Light", "css": ""},
+    "dark": {"label": "🌙", "name": "Nightfall", "css": DARK_THEME_CSS},
+}
+
+
+def _altair_dark_theme():
+    return {
+        "config": {
+            "background": "#0f172a",
+            "view": {"fill": "#0f172a", "stroke": "transparent"},
+            "title": {"color": "#f8fafc"},
+            "axis": {
+                "labelColor": "#e2e8f0",
+                "titleColor": "#f8fafc",
+                "gridColor": "#1f2937",
+                "domainColor": "#94a3b8",
+            },
+            "legend": {"labelColor": "#e2e8f0", "titleColor": "#f8fafc"},
+            "range": {"category": ["#60a5fa", "#f472b6", "#34d399", "#facc15", "#a78bfa"]},
+        }
+    }
+
+
+alt.themes.register(ALT_DARK_THEME_NAME, _altair_dark_theme)
+
+
+def inject_theme_toggle_css():
+    st.markdown(f"<style>{THEME_TOGGLE_CONTROL_CSS}</style>", unsafe_allow_html=True)
+
+
+def select_theme_code() -> str:
+    current = st.session_state.get(THEME_WIDGET_KEY, "light")
+    st.sidebar.markdown("### Theme")
+    st.sidebar.markdown('<div class="theme-toggle-control">', unsafe_allow_html=True)
+    selected = st.sidebar.select_slider(
+        "",
+        options=list(THEMES.keys()),
+        value=current,
+        key=THEME_WIDGET_KEY,
+        label_visibility="collapsed",
+    )
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+    st.sidebar.markdown("---")
+    return selected
+
+
+def apply_theme_css(theme_code: str) -> None:
+    css = THEMES.get(theme_code, THEMES["light"]).get("css")
+    if css:
+        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+
+
+def apply_altair_theme(theme_code: str) -> None:
+    if theme_code == "dark":
+        alt.themes.enable(ALT_DARK_THEME_NAME)
+    else:
+        alt.themes.enable("default")
+
 
 def select_language_code() -> str:
     if LANGUAGE_WIDGET_KEY not in st.session_state:
@@ -308,6 +496,11 @@ def select_language_code() -> str:
 
 def main():
     st.set_page_config(page_title="Suivi BT", layout="wide")
+
+    inject_theme_toggle_css()
+    theme_code = select_theme_code()
+    apply_theme_css(theme_code)
+    apply_altair_theme(theme_code)
 
     language_code = select_language_code()
     t = lambda key, **kwargs: TRANSLATIONS[key][language_code].format(**kwargs)
