@@ -21,6 +21,7 @@ LANGUAGE_LABELS = {
     "nl": "Taal",
 }
 LANGUAGE_NAME_MAP = {code: name for code, name in LANGUAGES}
+LANGUAGE_WIDGET_KEY = "language_selector"
 
 TRANSLATIONS = {
     "app_title": {
@@ -291,21 +292,17 @@ LIQUID_LABELS = {
 
 
 def select_language_code() -> str:
-    current_code = st.session_state.get("language_code", "en")
-    label = LANGUAGE_LABELS.get(current_code, "Language")
+    if LANGUAGE_WIDGET_KEY not in st.session_state:
+        st.session_state[LANGUAGE_WIDGET_KEY] = "en"
+    current_code = st.session_state[LANGUAGE_WIDGET_KEY]
+    label = LANGUAGE_LABELS.get(current_code, LANGUAGE_LABELS["en"])
     options = [code for code, _ in LANGUAGES]
-    try:
-        index = options.index(current_code)
-    except ValueError:
-        index = 0
-
     selected_code = st.sidebar.selectbox(
         label,
         options,
-        index=index,
         format_func=lambda code: LANGUAGE_NAME_MAP[code],
+        key=LANGUAGE_WIDGET_KEY,
     )
-    st.session_state["language_code"] = selected_code
     return selected_code
 
 
