@@ -1,418 +1,367 @@
 import streamlit as st
-import sqlite3
-import pandas as pd
-import altair as alt
-from datetime import date, datetime, time, timedelta
+from datetime import date, time
 
-DB_PATH = "journal_bt.db"
+from core.charts import (
+    make_basic_line_chart,
+    make_dynamic_line_chart,
+    make_liquids_chart,
+)
+from core.db import init_db, load_all, load_entry, upsert_entry
+from core.import_export import import_csv_to_db
+from core.utils import compute_sleep_hours, day_name_for_language
+
+LANGUAGES = [
+    ("en", "English"),
+    ("fr", "Français"),
+    ("nl", "Nederlands"),
+]
+LANGUAGE_LABELS = {
+    "en": "Language",
+    "fr": "Langue",
+    "nl": "Taal",
+}
+LANGUAGE_NAME_MAP = {code: name for code, name in LANGUAGES}
+
+TRANSLATIONS = {
+    "app_title": {
+        "en": "〆 Daily Journal",
+        "fr": "〆 Suivi journalier",
+        "nl": "〆 Dagelijks logboek",
+    },
+    "entry_tab": {"en": "Daily Entry", "fr": "Saisie du jour", "nl": "Dagelijkse invoer"},
+    "graphs_tab": {"en": "Charts", "fr": "Graphiques", "nl": "Grafieken"},
+    "history_tab": {"en": "History", "fr": "Historique", "nl": "Historiek"},
+    "entry_subheader": {
+        "en": "Enter / edit a day",
+        "fr": "Saisie / édition d'une journée",
+        "nl": "Dag invullen / bewerken",
+    },
+    "date_label": {"en": "Date", "fr": "Date", "nl": "Datum"},
+    "existing_entry": {
+        "en": "Data already exists for **{day_name} {date}** (editing).",
+        "fr": "Données déjà existantes pour **{day_name} {date}** (édition).",
+        "nl": "Gegevens bestaan al voor **{day_name} {date}** (bewerking).",
+    },
+    "new_entry": {
+        "en": "New entry for **{day_name} {date}**.",
+        "fr": "Nouvelle entrée pour **{day_name} {date}**.",
+        "nl": "Nieuwe invoer voor **{day_name} {date}**.",
+    },
+    "section_drinks": {
+        "en": "Drinks & nicotine",
+        "fr": "Boissons & nicotine",
+        "nl": "Dranken & nicotine",
+    },
+    "water_input": {
+        "en": "Water (L / day)",
+        "fr": "Eau (L / jour)",
+        "nl": "Water (L / dag)",
+    },
+    "coffee_input": {
+        "en": "Coffee (cups / day)",
+        "fr": "Cafés (tasses / jour)",
+        "nl": "Koffie (tassen / dag)",
+    },
+    "beer_input": {
+        "en": "Beer (L / day)",
+        "fr": "Bière (L / jour)",
+        "nl": "Bier (L / dag)",
+    },
+    "alcohol_input": {
+        "en": "Spirits (cl / day)",
+        "fr": "Alcool fort (cl / jour)",
+        "nl": "Sterke drank (cl / dag)",
+    },
+    "wine_input": {
+        "en": "Wine (cl / day)",
+        "fr": "Vin (cl / jour)",
+        "nl": "Wijn (cl / dag)",
+    },
+    "soda_input": {
+        "en": "Soda (L / day)",
+        "fr": "Soda (L / jour)",
+        "nl": "Frisdrank (L / dag)",
+    },
+    "section_nicotine": {
+        "en": "Nicotine / E-vape",
+        "fr": "Nicotine / E-vape",
+        "nl": "Nicotine / e-vape",
+    },
+    "nico_input": {
+        "en": "%nico (mg/mL or equivalent)",
+        "fr": "%nico (mg/mL ou équivalent)",
+        "nl": "%nico (mg/mL of equivalent)",
+    },
+    "section_party": {
+        "en": "Evening",
+        "fr": "Soirée",
+        "nl": "Avond",
+    },
+    "party_checkbox": {
+        "en": "Night out?",
+        "fr": "Soirée ?",
+        "nl": "Uitstapje?",
+    },
+    "party_name": {
+        "en": "With whom / where",
+        "fr": "Avec qui / où (N_soiree)",
+        "nl": "Met wie / waar",
+    },
+    "section_sleep": {
+        "en": "Sleep (wake / bed / duration)",
+        "fr": "Sommeil (Debout / Couchée / Sommeil)",
+        "nl": "Slaap (opstaan / naar bed / duur)",
+    },
+    "wake_label": {
+        "en": "Wake-up time",
+        "fr": "Heure de lever",
+        "nl": "Opstaan uur",
+    },
+    "sleep_label": {
+        "en": "Bedtime",
+        "fr": "Heure de coucher",
+        "nl": "Slaaptijd",
+    },
+    "sleep_metric": {
+        "en": "Sleep hours",
+        "fr": "Heures de sommeil (V_somm)",
+        "nl": "Slaapuren",
+    },
+    "section_run": {
+        "en": "Running",
+        "fr": "Sport (Courir)",
+        "nl": "Sport (lopen)",
+    },
+    "ran_checkbox": {"en": "Run?", "fr": "Courir ?", "nl": "Gelopen?"},
+    "run_distance": {"en": "Distance (km)", "fr": "Distance (km)", "nl": "Afstand (km)"},
+    "section_weight": {"en": "Weight", "fr": "Poids", "nl": "Gewicht"},
+    "weight_input": {"en": "Weight (kg)", "fr": "Poids (kg)", "nl": "Gewicht (kg)"},
+    "save_button": {
+        "en": "💾 Save / update",
+        "fr": "💾 Enregistrer / mettre à jour",
+        "nl": "💾 Opslaan / bijwerken",
+    },
+    "save_success": {
+        "en": "Data saved ✅",
+        "fr": "Données enregistrées ✅",
+        "nl": "Gegevens opgeslagen ✅",
+    },
+    "graphs_subheader": {"en": "Charts", "fr": "Graphiques", "nl": "Grafieken"},
+    "no_data_info": {
+        "en": "No data recorded yet.",
+        "fr": "Pas encore de données enregistrées.",
+        "nl": "Nog geen gegevens geregistreerd.",
+    },
+    "weight_chart_title": {
+        "en": "Weight (kg)",
+        "fr": "Poids (kg)",
+        "nl": "Gewicht (kg)",
+    },
+    "weight_chart_info": {
+        "en": "No useful weight data (all zero or empty).",
+        "fr": "Pas de données de poids utiles (toutes à 0 ou vides).",
+        "nl": "Geen bruikbare gewichtgegevens (alles nul of leeg).",
+    },
+    "sleep_chart_title": {
+        "en": "Sleep (hours per night)",
+        "fr": "Sommeil (heures par nuit)",
+        "nl": "Slaap (uren per nacht)",
+    },
+    "sleep_chart_info": {
+        "en": "No useful sleep data.",
+        "fr": "Pas de données de sommeil utiles.",
+        "nl": "Geen bruikbare slaapgegevens.",
+    },
+    "nico_chart_title": {
+        "en": "Nicotine (`%nico`)",
+        "fr": "Nicotine (`%nico`)",
+        "nl": "Nicotine (`%nico`)",
+    },
+    "nico_chart_info": {
+        "en": "No useful nicotine data.",
+        "fr": "Pas de données de nicotine utiles.",
+        "nl": "Geen bruikbare nicotinegegevens.",
+    },
+    "run_chart_title": {
+        "en": "Running (km)",
+        "fr": "Course (km)",
+        "nl": "Lopen (km)",
+    },
+    "run_chart_info": {
+        "en": "No useful running data.",
+        "fr": "Pas de données de course utiles.",
+        "nl": "Geen bruikbare loopgegevens.",
+    },
+    "liquids_section": {
+        "en": "Liquid consumption",
+        "fr": "Consommation de liquides",
+        "nl": "Vloeistofconsumptie",
+    },
+    "liquid_select": {
+        "en": "Liquids to display",
+        "fr": "Liquides à afficher",
+        "nl": "Te tonen vloeistoffen",
+    },
+    "liquid_info_empty": {
+        "en": "Select at least one liquid to display the chart.",
+        "fr": "Sélectionne au moins un liquide pour afficher le graphique.",
+        "nl": "Selecteer minstens één vloeistof om de grafiek te tonen.",
+    },
+    "liquid_no_data": {
+        "en": "No useful liquid data (all empty).",
+        "fr": "Pas de données de liquides utiles (toutes vides).",
+        "nl": "Geen bruikbare vloeistofgegevens (alles leeg).",
+    },
+    "history_subheader": {
+        "en": "Detailed history",
+        "fr": "Historique détaillé",
+        "nl": "Gedetailleerde historiek",
+    },
+    "export_section": {
+        "en": "Data export",
+        "fr": "Export des données",
+        "nl": "Gegevens export",
+    },
+    "export_info": {
+        "en": "No data recorded yet, nothing to export.",
+        "fr": "Pas encore de données enregistrées, rien à exporter.",
+        "nl": "Nog geen gegevens geregistreerd, niets om te exporteren.",
+    },
+    "export_button": {
+        "en": "📥 Export data to CSV",
+        "fr": "📥 Exporter les données en CSV",
+        "nl": "📥 Gegevens exporteren naar CSV",
+    },
+    "import_section": {
+        "en": "Import from CSV (Excel or app export)",
+        "fr": "Import depuis un CSV (Excel ou export de l'app)",
+        "nl": "Importeer vanuit CSV (Excel of app-export)",
+    },
+    "weight_axis": {
+        "en": "Weight (kg)",
+        "fr": "Poids (kg)",
+        "nl": "Gewicht (kg)",
+    },
+    "sleep_axis": {
+        "en": "Sleep (h)",
+        "fr": "Sommeil (h)",
+        "nl": "Slaap (u)",
+    },
+    "nico_axis": {
+        "en": "%nico",
+        "fr": "%nico",
+        "nl": "%nico",
+    },
+    "run_axis": {
+        "en": "Running (km)",
+        "fr": "Course (km)",
+        "nl": "Lopen (km)",
+    },
+    "import_label": {
+        "en": "Choose a CSV file to import",
+        "fr": "Choisis un fichier CSV à importer",
+        "nl": "Kies een CSV-bestand om te importeren",
+    },
+    "import_help": {
+        "en": "Export your DB_DATA_SCADA sheet from Excel as CSV, then import it here.",
+        "fr": "Tu peux exporter ton onglet DB_DATA_SCADA en CSV depuis Excel, puis l'importer ici.",
+        "nl": "Exporteer je DB_DATA_SCADA-blad uit Excel naar CSV en importeer het hier.",
+    },
+    "import_success": {
+        "en": "{rows} rows imported/updated successfully ✅",
+        "fr": "{rows} lignes importées / mises à jour avec succès ✅",
+        "nl": "{rows} rijen succesvol geimporteerd/bijgewerkt ✅",
+    },
+    "import_error": {
+        "en": "Import error: {error}",
+        "fr": "Erreur lors de l'import : {error}",
+        "nl": "Importfout: {error}",
+    },
+}
+
+LIQUID_FIELDS = ["water_l", "beer_l", "wine_cl", "alcool_cl", "soda_l"]
+
+LIQUID_LABELS = {
+    "water_l": {"en": "Water (L)", "fr": "Eau (L)", "nl": "Water (L)"},
+    "beer_l": {"en": "Beer (L)", "fr": "Bière (L)", "nl": "Bier (L)"},
+    "wine_cl": {"en": "Wine (cl)", "fr": "Vin (cl)", "nl": "Wijn (cl)"},
+    "alcool_cl": {"en": "Spirits (cl)", "fr": "Alcool fort (cl)", "nl": "Sterke drank (cl)"},
+    "soda_l": {"en": "Soda (L)", "fr": "Soda (L)", "nl": "Frisdrank (L)"},
+}
 
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS journal (
-            date TEXT PRIMARY KEY,
-            day_name TEXT,
-            nico REAL,
-            water_l REAL,
-            coffee INT,
-            beer_l REAL,
-            alcool_cl REAL,
-            wine_cl REAL,
-            soda_l REAL,
-            soiree INTEGER,
-            soiree_name TEXT,
-            wake_time TEXT,
-            sleep_time TEXT,
-            sleep_hours REAL,
-            ran INTEGER,
-            run_km REAL,
-            weight REAL
-        )
-        """
-    )
-    conn.commit()
-    conn.close()
-
-
-def load_entry(d: date):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT * FROM journal WHERE date = ?", (d.isoformat(),))
-    row = c.fetchone()
-    conn.close()
-    if not row:
-        return None
-    (
-        date_str,
-        day_name,
-        nico,
-        water_l,
-        coffee,
-        beer_l,
-        alcool_cl,
-        wine_cl,
-        soda_l,
-        soiree,
-        soiree_name,
-        wake_time,
-        sleep_time,
-        sleep_hours,
-        ran,
-        run_km,
-        weight,
-    ) = row
-
-    def parse_time(s):
-        if s is None:
-            return None
-        try:
-            return datetime.strptime(s, "%H:%M").time()
-        except Exception:
-            return None
-
-    return {
-        "date": datetime.fromisoformat(date_str).date(),
-        "day_name": day_name,
-        "nico": nico,
-        "water_l": water_l,
-        "coffee": coffee,
-        "beer_l": beer_l,
-        "alcool_cl": alcool_cl,
-        "wine_cl": wine_cl,
-        "soda_l": soda_l,
-        "soiree": bool(soiree),
-        "soiree_name": soiree_name,
-        "wake_time": parse_time(wake_time),
-        "sleep_time": parse_time(sleep_time),
-        "sleep_hours": sleep_hours,
-        "ran": bool(ran),
-        "run_km": run_km,
-        "weight": weight,
-    }
-
-
-def upsert_entry(data: dict):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        """
-        INSERT INTO journal (
-            date, day_name, nico, water_l, coffee, beer_l,
-            alcool_cl, wine_cl, soda_l,
-            soiree, soiree_name,
-            wake_time, sleep_time, sleep_hours,
-            ran, run_km, weight
-        ) VALUES (
-            :date, :day_name, :nico, :water_l, :coffee, :beer_l,
-            :alcool_cl, :wine_cl, :soda_l,
-            :soiree, :soiree_name,
-            :wake_time, :sleep_time, :sleep_hours,
-            :ran, :run_km, :weight
-        )
-        ON CONFLICT(date) DO UPDATE SET
-            day_name = excluded.day_name,
-            nico = excluded.nico,
-            water_l = excluded.water_l,
-            coffee = excluded.coffee,
-            beer_l = excluded.beer_l,
-            alcool_cl = excluded.alcool_cl,
-            wine_cl = excluded.wine_cl,
-            soda_l = excluded.soda_l,
-            soiree = excluded.soiree,
-            soiree_name = excluded.soiree_name,
-            wake_time = excluded.wake_time,
-            sleep_time = excluded.sleep_time,
-            sleep_hours = excluded.sleep_hours,
-            ran = excluded.ran,
-            run_km = excluded.run_km,
-            weight = excluded.weight
-        """,
-        data,
-    )
-    conn.commit()
-    conn.close()
-
-
-def load_all():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM journal ORDER BY date", conn)
-    conn.close()
-    if not df.empty:
-        df["date"] = pd.to_datetime(df["date"]).dt.date
-    return df
-
-
-def french_day_name(d: date) -> str:
-    jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-    return jours[d.weekday()]
-
-
-def compute_sleep_hours(sleep_t: time, wake_t: time) -> float:
-    if sleep_t is None or wake_t is None:
-        return 0.0
-    today = date.today()
-    dt_sleep = datetime.combine(today, sleep_t)
-    dt_wake = datetime.combine(today, wake_t)
-    if dt_wake <= dt_sleep:
-        dt_wake += timedelta(days=1)
-    delta = dt_wake - dt_sleep
-    return round(delta.total_seconds() / 3600.0, 2)
-
-
-def float_to_time_str(x):
-    if pd.isna(x):
-        return None
+def select_language_code() -> str:
+    current_code = st.session_state.get("language_code", "en")
+    label = LANGUAGE_LABELS.get(current_code, "Language")
+    options = [code for code, _ in LANGUAGES]
     try:
-        x = float(x)
-    except Exception:
-        return None
-    hours = int(x)
-    minutes = int(round((x - hours) * 60))
-    if minutes >= 60:
-        hours += 1
-        minutes -= 60
-    hours = hours % 24
-    return f"{hours:02d}:{minutes:02d}"
+        index = options.index(current_code)
+    except ValueError:
+        index = 0
 
-
-def import_csv_to_db(file) -> int:
-    df = pd.read_csv(file, engine="python", sep=None)
-
-    col_map = {
-        "Temps": "date",
-        "V_jour": "day_name",
-        "%nico": "nico",
-        "L_eau": "water_l",
-        "T_coffee": "coffee",
-        "L_bière": "beer_l",
-        "L_biere": "beer_l",
-        "cl_alcool": "alcool_cl",
-        "cl_vin": "wine_cl",
-        "L_soda": "soda_l",
-        "B_soiree": "soiree",
-        "N_soiree": "soiree_name",
-        "V_debout": "wake_time",
-        "V_couche": "sleep_time",
-        "V_somm": "sleep_hours",
-        "B_courrir": "ran",
-        "V_courrir": "run_km",
-        "V_poids": "weight",
-        "date": "date",
-        "day_name": "day_name",
-        "nico": "nico",
-        "water_l": "water_l",
-        "coffee": "coffee",
-        "beer_l": "beer_l",
-        "alcool_cl": "alcool_cl",
-        "wine_cl": "wine_cl",
-        "soda_l": "soda_l",
-        "soiree": "soiree",
-        "soiree_name": "soiree_name",
-        "wake_time": "wake_time",
-        "sleep_time": "sleep_time",
-        "sleep_hours": "sleep_hours",
-        "ran": "ran",
-        "run_km": "run_km",
-        "weight": "weight",
-    }
-
-    new_cols = {}
-    for col in df.columns:
-        if col in col_map:
-            new_cols[col] = col_map[col]
-    df = df.rename(columns=new_cols)
-
-    wanted_cols = [
-        "date",
-        "day_name",
-        "nico",
-        "water_l",
-        "coffee",
-        "beer_l",
-        "alcool_cl",
-        "wine_cl",
-        "soda_l",
-        "soiree",
-        "soiree_name",
-        "wake_time",
-        "sleep_time",
-        "sleep_hours",
-        "ran",
-        "run_km",
-        "weight",
-    ]
-    for c in wanted_cols:
-        if c not in df.columns:
-            df[c] = None
-
-    if df["date"].isna().all():
-        raise ValueError("Aucune colonne 'date' ou 'Temps' valide trouvée dans le CSV.")
-
-    df["date"] = pd.to_datetime(df["date"], errors="coerce", dayfirst=True).dt.date
-    df = df.dropna(subset=["date"])
-
-    if df["wake_time"].dtype != "object":
-        df["wake_time"] = df["wake_time"].apply(float_to_time_str)
-    else:
-        df["wake_time"] = df["wake_time"].astype(str).where(df["wake_time"].notna(), None)
-
-    if df["sleep_time"].dtype != "object":
-        df["sleep_time"] = df["sleep_time"].apply(float_to_time_str)
-    else:
-        df["sleep_time"] = df["sleep_time"].astype(str).where(df["sleep_time"].notna(), None)
-
-    df["soiree"] = df["soiree"].fillna(0).astype(int)
-    df["ran"] = df["ran"].fillna(0).astype(int)
-    df["coffee"] = df["coffee"].fillna(0).astype(int)
-
-    for col in ["nico", "water_l", "beer_l", "alcool_cl", "wine_cl", "soda_l",
-                "sleep_hours", "run_km", "weight"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    df["day_name"] = df["day_name"].astype(str)
-    df.loc[df["day_name"].isin(["", "nan", "NaT"]), "day_name"] = df["date"].apply(french_day_name)
-
-    count = 0
-    for _, row in df.iterrows():
-        data = {
-            "date": row["date"].isoformat(),
-            "day_name": row["day_name"],
-            "nico": float(row["nico"]) if not pd.isna(row["nico"]) else None,
-            "water_l": float(row["water_l"]) if not pd.isna(row["water_l"]) else 0.0,
-            "coffee": int(row["coffee"]) if not pd.isna(row["coffee"]) else 0,
-            "beer_l": float(row["beer_l"]) if not pd.isna(row["beer_l"]) else 0.0,
-            "alcool_cl": float(row["alcool_cl"]) if not pd.isna(row["alcool_cl"]) else 0.0,
-            "wine_cl": float(row["wine_cl"]) if not pd.isna(row["wine_cl"]) else 0.0,
-            "soda_l": float(row["soda_l"]) if not pd.isna(row["soda_l"]) else 0.0,
-            "soiree": int(row["soiree"]) if not pd.isna(row["soiree"]) else 0,
-            "soiree_name": row["soiree_name"] if pd.notna(row["soiree_name"]) else None,
-            "wake_time": row["wake_time"] if pd.notna(row["wake_time"]) else None,
-            "sleep_time": row["sleep_time"] if pd.notna(row["sleep_time"]) else None,
-            "sleep_hours": float(row["sleep_hours"]) if not pd.isna(row["sleep_hours"]) else 0.0,
-            "ran": int(row["ran"]) if not pd.isna(row["ran"]) else 0,
-            "run_km": float(row["run_km"]) if not pd.isna(row["run_km"]) else 0.0,
-            "weight": float(row["weight"]) if not pd.isna(row["weight"]) else None,
-        }
-        upsert_entry(data)
-        count += 1
-
-    return count
-
-
-def make_dynamic_line_chart(df, y_col, y_label):
-    s = df[y_col].dropna()
-    s = s[s != 0]
-    if s.empty:
-        return None
-    ymin = s.min()
-    ymax = s.max()
-    if ymin == ymax:
-        ymin -= 1
-        ymax += 1
-    padding = (ymax - ymin) * 0.1
-    domain = (ymin - padding, ymax + padding)
-    chart = (
-        alt.Chart(df.reset_index())
-        .mark_line()
-        .encode(
-            x=alt.X("date:T", title="Date"),
-            y=alt.Y(f"{y_col}:Q", title=y_label, scale=alt.Scale(domain=domain)),
-            tooltip=["date:T", alt.Tooltip(f"{y_col}:Q", title=y_label)],
-        )
-        .properties(height=300)
+    selected_code = st.sidebar.selectbox(
+        label,
+        options,
+        index=index,
+        format_func=lambda code: LANGUAGE_NAME_MAP[code],
     )
-    return chart
-
-
-def make_basic_line_chart(df, y_col, y_label):
-    s = df[y_col].dropna()
-    if s.empty:
-        return None
-    chart = (
-        alt.Chart(df.reset_index())
-        .mark_line()
-        .encode(
-            x=alt.X("date:T", title="Date"),
-            y=alt.Y(f"{y_col}:Q", title=y_label),
-            tooltip=["date:T", alt.Tooltip(f"{y_col}:Q", title=y_label)],
-        )
-        .properties(height=300)
-    )
-    return chart
-
-
-def make_liquids_chart(df_sorted, cols, label_map):
-    df_liquids = df_sorted[cols]
-    df_melt = df_liquids.reset_index().melt("date", var_name="type", value_name="value")
-    df_melt = df_melt.dropna(subset=["value"])
-    if df_melt.empty:
-        return None
-    df_melt["type"] = df_melt["type"].map(label_map)
-    chart = (
-        alt.Chart(df_melt)
-        .mark_line()
-        .encode(
-            x=alt.X("date:T", title="Date"),
-            y=alt.Y("value:Q", title="Quantité"),
-            color=alt.Color("type:N", title="Liquide"),
-            tooltip=["date:T", "type:N", "value:Q"],
-        )
-        .properties(height=300)
-    )
-    return chart
+    st.session_state["language_code"] = selected_code
+    return selected_code
 
 
 def main():
     st.set_page_config(page_title="Suivi BT", layout="wide")
 
+    language_code = select_language_code()
+    t = lambda key, **kwargs: TRANSLATIONS[key][language_code].format(**kwargs)
+
     init_db()
 
-    st.title("〆 Suivi journalier")
+    st.title(t("app_title"))
 
     df = load_all()
 
     tab_saisie, tab_graphs, tab_histo = st.tabs(
-        ["Saisie du jour", "Graphiques", "Historique"]
+        [t("entry_tab"), t("graphs_tab"), t("history_tab")]
     )
 
     with tab_saisie:
-        st.subheader("Saisie / édition d'une journée")
+        st.subheader(t("entry_subheader"))
 
         col_date, col_day = st.columns([1, 1])
         with col_date:
-            selected_date = st.date_input("Date", value=date.today())
+            selected_date = st.date_input(t("date_label"), value=date.today())
         with col_day:
             st.write(" ")
 
         existing = load_entry(selected_date)
-        day_name = french_day_name(selected_date)
+        day_name = day_name_for_language(selected_date, language_code)
 
         if existing:
-            st.info(f"Données déjà existantes pour **{day_name} {selected_date}** (édition).")
+            st.info(t("existing_entry", day_name=day_name, date=selected_date))
         else:
-            st.success(f"Nouvelle entrée pour **{day_name} {selected_date}**.")
+            st.success(t("new_entry", day_name=day_name, date=selected_date))
 
         def dv(key, default):
             return existing.get(key) if existing and existing.get(key) is not None else default
 
-        st.markdown("### Boissons")
+        st.markdown(f"### {t('section_drinks')}")
         c1, c2, c3 = st.columns(3)
         with c1:
-            water_l = st.number_input("Eau (L / jour)", 0.0, 10.0, dv("water_l", 0.0), step=0.1)
-            coffee = st.number_input("Cafés (tasses / jour)", 0, 30, dv("coffee", 0), step=1)
+            water_l = st.number_input(t("water_input"), 0.0, 10.0, dv("water_l", 0.0), step=0.1)
+            coffee = st.number_input(t("coffee_input"), 0, 30, dv("coffee", 0), step=1)
         with c2:
-            beer_l = st.number_input("Bière (L / jour)", 0.0, 10.0, dv("beer_l", 0.0), step=0.1)
-            alcool_cl = st.number_input("Alcool fort (cl / jour)", 0.0, 100.0, dv("alcool_cl", 0.0), step=1.0)
+            beer_l = st.number_input(t("beer_input"), 0.0, 10.0, dv("beer_l", 0.0), step=0.1)
+            alcool_cl = st.number_input(
+                t("alcohol_input"), 0.0, 100.0, dv("alcool_cl", 0.0), step=1.0
+            )
         with c3:
-            wine_cl = st.number_input("Vin (cl / jour)", 0.0, 200.0, dv("wine_cl", 0.0), step=5.0)
-            soda_l = st.number_input("Soda (L / jour)", 0.0, 10.0, dv("soda_l", 0.0), step=0.1)
+            wine_cl = st.number_input(t("wine_input"), 0.0, 200.0, dv("wine_cl", 0.0), step=5.0)
+            soda_l = st.number_input(t("soda_input"), 0.0, 10.0, dv("soda_l", 0.0), step=0.1)
 
-        st.markdown("#### Nicotine / E-vape")
+        st.markdown(f"#### {t('section_nicotine')}")
         nico = st.number_input(
-            "%nico (mg/mL ou équivalent)",
+            t("nico_input"),
             0.0,
             20.0,
             dv("nico", 3.17),
@@ -420,36 +369,36 @@ def main():
             format="%.2f",
         )
 
-        st.markdown("### Soirée")
+        st.markdown(f"### {t('section_party')}")
         c_soir1, c_soir2 = st.columns([1, 2])
         with c_soir1:
-            soiree = st.checkbox("Soirée ?", value=dv("soiree", False))
+            soiree = st.checkbox(t("party_checkbox"), value=dv("soiree", False))
         with c_soir2:
-            soiree_name = st.text_input("Avec qui / où (N_soiree)", value=dv("soiree_name", "") or "")
+            soiree_name = st.text_input(t("party_name"), value=dv("soiree_name", "") or "")
 
-        st.markdown("### Sommeil (Debout / Couchée / Sommeil)")
+        st.markdown(f"### {t('section_sleep')}")
         c_sleep1, c_sleep2, c_sleep3 = st.columns(3)
         with c_sleep1:
             wake_default = dv("wake_time", time(6, 0))
-            wake_time = st.time_input("Heure de lever", value=wake_default)
+            wake_time = st.time_input(t("wake_label"), value=wake_default)
         with c_sleep2:
             sleep_default = dv("sleep_time", time(23, 0))
-            sleep_time = st.time_input("Heure de coucher", value=sleep_default)
+            sleep_time = st.time_input(t("sleep_label"), value=sleep_default)
         with c_sleep3:
             sleep_hours = compute_sleep_hours(sleep_time, wake_time)
-            st.metric("Heures de sommeil (V_somm)", f"{sleep_hours} h")
+            st.metric(t("sleep_metric"), f"{sleep_hours} h")
 
-        st.markdown("### Sport (Courir)")
+        st.markdown(f"### {t('section_run')}")
         c_run1, c_run2 = st.columns(2)
         with c_run1:
-            ran = st.checkbox("Courir ?", value=dv("ran", False))
+            ran = st.checkbox(t("ran_checkbox"), value=dv("ran", False))
         with c_run2:
-            run_km = st.number_input("Distance (km)", 0.0, 100.0, dv("run_km", 0.0), step=0.5)
+            run_km = st.number_input(t("run_distance"), 0.0, 100.0, dv("run_km", 0.0), step=0.5)
 
-        st.markdown("### Poids")
-        weight = st.number_input("Poids (kg)", 0.0, 400.0, dv("weight", 0.0), step=0.1)
+        st.markdown(f"### {t('section_weight')}")
+        weight = st.number_input(t("weight_input"), 0.0, 400.0, dv("weight", 0.0), step=0.1)
 
-        if st.button("💾 Enregistrer / mettre à jour"):
+        if st.button(t("save_button")):
             data = {
                 "date": selected_date.isoformat(),
                 "day_name": day_name,
@@ -470,57 +419,53 @@ def main():
                 "weight": float(weight) if weight else None,
             }
             upsert_entry(data)
-            st.success("Données enregistrées ✅")
+            st.success(t("save_success"))
 
     with tab_graphs:
-        st.subheader("Graphiques")
+        st.subheader(t("graphs_subheader"))
 
         if df.empty:
-            st.info("Pas encore de données enregistrées.")
+            st.info(t("no_data_info"))
         else:
             df_sorted = df.sort_values("date").set_index("date")
 
-            st.markdown("#### Poids (kg)")
-            chart_weight = make_dynamic_line_chart(df_sorted, "weight", "Poids (kg)")
+            st.markdown(f"#### {t('weight_chart_title')}")
+            chart_weight = make_dynamic_line_chart(df_sorted, "weight", t("weight_axis"))
             if chart_weight is not None:
                 st.altair_chart(chart_weight, use_container_width=True)
             else:
-                st.write("Pas de données de poids utiles (toutes à 0 ou vides).")
+                st.write(t("weight_chart_info"))
 
-            st.markdown("#### Sommeil (heures par nuit)")
-            chart_sleep = make_dynamic_line_chart(df_sorted, "sleep_hours", "Sommeil (h)")
+            st.markdown(f"#### {t('sleep_chart_title')}")
+            chart_sleep = make_dynamic_line_chart(df_sorted, "sleep_hours", t("sleep_axis"))
             if chart_sleep is not None:
                 st.altair_chart(chart_sleep, use_container_width=True)
             else:
-                st.write("Pas de données de sommeil utiles.")
+                st.write(t("sleep_chart_info"))
 
-            st.markdown("#### Nicotine")
-            chart_nico = make_basic_line_chart(df_sorted, "nico", "%nico")
+            st.markdown(f"#### {t('nico_chart_title')}")
+            chart_nico = make_basic_line_chart(df_sorted, "nico", t("nico_axis"))
             if chart_nico is not None:
                 st.altair_chart(chart_nico, use_container_width=True)
             else:
-                st.write("Pas de données de nicotine utiles.")
+                st.write(t("nico_chart_info"))
 
-            st.markdown("#### Course (km)")
-            chart_run = make_basic_line_chart(df_sorted, "run_km", "Course (km)")
+            st.markdown(f"#### {t('run_chart_title')}")
+            chart_run = make_basic_line_chart(df_sorted, "run_km", t("run_axis"))
             if chart_run is not None:
                 st.altair_chart(chart_run, use_container_width=True)
             else:
-                st.write("Pas de données de course utiles.")
+                st.write(t("run_chart_info"))
 
-            st.markdown("#### Consommation de liquides")
+            st.markdown(f"#### {t('liquids_section')}")
 
             liquid_options = {
-                "Eau (L)": "water_l",
-                "Bière (L)": "beer_l",
-                "Vin (cl)": "wine_cl",
-                "Alcool fort (cl)": "alcool_cl",
-                "Soda (L)": "soda_l",
+                LIQUID_LABELS[field][language_code]: field for field in LIQUID_FIELDS
             }
             reverse_label = {v: k for k, v in liquid_options.items()}
 
             selected_liquids = st.multiselect(
-                "Liquides à afficher",
+                t("liquid_select"),
                 list(liquid_options.keys()),
                 default=list(liquid_options.keys()),
             )
@@ -531,20 +476,20 @@ def main():
                 if chart_liquids is not None:
                     st.altair_chart(chart_liquids, use_container_width=True)
                 else:
-                    st.info("Pas de données de liquides utiles (toutes vides).")
+                    st.info(t("liquid_no_data"))
             else:
-                st.info("Sélectionne au moins un liquide pour afficher le graphique.")
+                st.info(t("liquid_info_empty"))
 
     with tab_histo:
-        st.subheader("Historique détaillé")
+        st.subheader(t("history_subheader"))
 
-        st.markdown("### Export des données")
+        st.markdown(f"### {t('export_section')}")
         if df.empty:
-            st.info("Pas encore de données enregistrées, rien à exporter.")
+            st.info(t("export_info"))
         else:
             csv_data = df.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="📥 Exporter les données en CSV",
+                label=t("export_button"),
                 data=csv_data,
                 file_name="journal_bt.csv",
                 mime="text/csv",
@@ -552,25 +497,25 @@ def main():
 
         st.markdown("---")
 
-        st.markdown("### Import depuis un CSV (Excel ou export de l'app)")
+        st.markdown(f"### {t('import_section')}")
         uploaded_file = st.file_uploader(
-            "Choisis un fichier CSV à importer",
+            t("import_label"),
             type=["csv"],
-            help="Tu peux exporter ton onglet DB_DATA_SCADA en CSV depuis Excel, puis l'importer ici.",
+            help=t("import_help"),
         )
 
         if uploaded_file is not None:
             try:
                 n = import_csv_to_db(uploaded_file)
-                st.success(f"{n} lignes importées / mises à jour avec succès ✅")
+                st.success(t("import_success", rows=n))
             except Exception as e:
-                st.error(f"Erreur lors de l'import : {e}")
+                st.error(t("import_error", error=e))
 
         st.markdown("---")
 
         df = load_all()
         if df.empty:
-            st.info("Pas encore de données enregistrées.")
+            st.info(t("no_data_info"))
         else:
             df_view = df[
                 [
@@ -591,6 +536,10 @@ def main():
                     "weight",
                 ]
             ].sort_values("date")
+            df_view = df_view.copy()
+            df_view["day_name"] = df_view["date"].apply(
+                lambda d: day_name_for_language(d, language_code)
+            )
 
             st.dataframe(df_view, use_container_width=True)
 
